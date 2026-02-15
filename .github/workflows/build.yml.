@@ -1,0 +1,195 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: kivy/buildozer:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create main.py
+        run: |
+          cat > main.py << 'EOF'
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.button import Button
+from kivy.uix.scrollview import ScrollView
+from kivy.core.window import Window
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.graphics import Color, RoundedRectangle
+
+Window.clearcolor = (0.1, 0.1, 0.1, 1)  # Dark background
+
+class MessageBubble(BoxLayout):
+    """Chat message bubble with rounded corners."""
+    def __init__(self, text, is_user=True, **kwargs):
+        super().__init__(**kwargs)
+        self.orientation = 'horizontal'
+        self.size_hint_y = None
+        self.height = dp(60)
+        self.padding = [dp(10), dp(5)]
+        self.spacing = dp(10)
+
+        # Bubble color: blue for user, gray for bot
+        bubble_color = (0.1, 0.4, 0.6, 1) if is_user else (0.2, 0.3, 0.4, 1)
+        halign = 'right' if is_user else 'left'
+
+        # Draw background rectangle
+        with self.canvas.before:
+            Color(*bubble_color)
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(10)])
+
+        self.label = Label(
+            text=text,
+            size_hint=(None, 1),
+            width=dp(280),
+            text_size=(dp(270), None),
+            halign=halign,
+            valign='middle',
+            color=(1, 1, 1, 1),
+            markup=True
+        )
+        self.label.bind(texture_size=self.label.setter('size'))
+        self.add_widget(self.label)
+        self.bind(pos=self.update_rect, size=self.update_rect)
+
+    def update_rect(self, *args):
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+
+class ChatApp(App):
+    def build(self):
+        main = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+
+        # Scrollable chat area
+        self.scroll = ScrollView()
+        self.chat_area = BoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            spacing=dp(5)
+        )
+        self.chat_area.bind(minimum_height=self.chat_area.setter('height'))
+        self.scroll.add_widget(self.chat_area)
+
+        # Input area
+        bottom = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        self.input = TextInput(
+            multiline=False,
+            hint_text="Type your message...",
+            background_color=(0.2, 0.2, 0.2, 1),
+            foreground_color=(1, 1, 1, 1),
+            cursor_color=(1, 1, 1, 1)
+        )
+        self.input.bind(on_text_validate=self.send_message)
+
+        send_btn = Button(
+            text="Send",
+            size_hint_x=None,
+            width=dp(70),
+            background_color=(0.2, 0.6, 1, 1)
+        )
+        send_btn.bind(on_release=self.send_message)
+
+        bottom.add_widget(self.input)
+        bottom.add_widget(send_btn)
+
+        main.add_widget(self.scroll)
+        main.add_widget(bottom)
+
+        # Welcome message
+        self.add_message("Hello! How can I help you?", is_user=False)
+        return main
+
+    def send_message(self, instance):
+        user_msg = self.input.text.strip()
+        if not user_msg:
+            return
+        self.add_message(user_msg, is_user=True)
+        self.input.text = ""
+        # Simulate bot typing
+        Clock.schedule_once(lambda dt: self.generate_response(user_msg), 0.8)
+
+    def generate_response(self, user_msg):
+        lower_msg = user_msg.lower()
+        
+        # Enhanced response patterns
+        greetings = ['hello', 'hi', 'hey', 'greetings']
+        how_are_you = ['how are you', 'how do you do', "what's up", 'how is it going']
+        feeling_good = ['good', 'great', 'fine', 'well', 'excellent', 'awesome']
+        farewell = ['bye', 'goodbye', 'see you', 'later', 'cya']
+        thanks = ['thanks', 'thank you', 'appreciate it']
+        name_question = ['your name', 'who are you', 'what are you']
+        capabilities = ['can you do', 'help', 'abilities', 'features']
+
+        if any(word in lower_msg for word in greetings):
+            response = "Hello! How are you today?"
+        elif any(phrase in lower_msg for phrase in how_are_you):
+            response = "I'm doing great, thank you for asking! How about you?"
+        elif any(word in lower_msg for word in feeling_good):
+            response = "I'm glad to hear that! 😊"
+        elif any(word in lower_msg for word in farewell):
+            response = "Goodbye! Have a wonderful day! 👋"
+        elif any(word in lower_msg for word in thanks):
+            response = "You're very welcome! Happy to help!"
+        elif any(phrase in lower_msg for phrase in name_question):
+            response = "I'm a friendly chatbot created with Kivy and Python!"
+        elif any(phrase in lower_msg for phrase in capabilities):
+            response = "I can chat with you, answer simple questions, and keep you company!"
+        else:
+            response = "That's interesting! Tell me more about it."
+        
+        self.add_message(response, is_user=False)
+
+    def add_message(self, text, is_user):
+        bubble = MessageBubble(text=text, is_user=is_user)
+        self.chat_area.add_widget(bubble)
+        # Auto-scroll to bottom
+        Clock.schedule_once(lambda dt: setattr(self.scroll, 'scroll_y', 0), 0.1)
+
+if __name__ == '__main__':
+    ChatApp().run()
+EOF
+
+      - name: Create buildozer.spec
+        run: |
+          cat > buildozer.spec << 'EOF'
+[app]
+title = My ChatGPT
+package.name = mychatbot
+package.domain = org.example
+source.dir = .
+source.include_exts = py,png,jpg,kv,atlas
+version = 0.1
+requirements = python3,kivy==2.1.0
+orientation = portrait
+fullscreen = 0
+
+[buildozer]
+log_level = 2
+android.accept_sdk_license = True
+android.ndk = 25b
+android.sdk = 24
+android.minapi = 21
+android.api = 31
+android.arch = arm64-v8a
+EOF
+
+      - name: Build APK
+        run: |
+          yes | buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-chatbot-apk
+          path: bin/*.apk
